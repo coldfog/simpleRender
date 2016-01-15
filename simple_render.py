@@ -162,14 +162,14 @@ class Device:
                 v.pos[0] = device.height - 1
             if v.pos[0] < 0:
                 v.pos[0] = 0
-        rr, cc = line(v1.pos[0].astype(int), v1.pos[1].astype(int),
-                      v2.pos[0].astype(int), v2.pos[1].astype(int))
+        rr, cc = line(v1.pos[1].astype(int), v1.pos[0].astype(int),
+                      v2.pos[1].astype(int), v2.pos[0].astype(int))
         self._frame_buffer[rr, cc, :] = 255
-        rr, cc = line(v2.pos[0].astype(int), v2.pos[1].astype(int),
-                      v3.pos[0].astype(int), v3.pos[1].astype(int))
+        rr, cc = line(v2.pos[1].astype(int), v2.pos[0].astype(int),
+                      v3.pos[1].astype(int), v3.pos[0].astype(int))
         self._frame_buffer[rr, cc, :] = 255
-        rr, cc = line(v3.pos[0].astype(int), v3.pos[1].astype(int),
-                      v1.pos[0].astype(int), v1.pos[1].astype(int))
+        rr, cc = line(v3.pos[1].astype(int), v3.pos[0].astype(int),
+                      v1.pos[1].astype(int), v1.pos[0].astype(int))
         self._frame_buffer[rr, cc, :] = 255
 
     def draw_quad(self, v1, v2, v3, v4):
@@ -208,6 +208,7 @@ if __name__ == '__main__':
 
     d = 1
 
+    print device.transform(vector([0,0,0,1]))
     @game_window.event
     def on_draw():
         game_window.clear()
