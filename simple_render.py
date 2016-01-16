@@ -197,6 +197,13 @@ class Device:
         self.draw_primitive(v1, v2, v3)
         self.draw_primitive(v3, v4, v1)
 
+    def draw_mesh(self, vertices, indices):
+        for i in indices:
+            if len(i) == 3:
+                self.draw_primitive(vertices[i[0]], vertices[i[1]], vertices[i[2]])
+            else:
+                self.draw_quad(vertices[i[0]], vertices[i[1]], vertices[i[2]], vertices[i[3]])
+
 
 if __name__ == '__main__':
     game_window = pyglet.window.Window(WINDOW_W, WINDOW_H)
@@ -221,6 +228,7 @@ if __name__ == '__main__':
         Vertex(pos=vector([1, 1, -1, 1]), tex_coor=vector([1, 0]),
                color=vector([0.2, 1.0, 0.3]), rhw=1)
     ]
+    indices = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]
 
     frame = image.create(device.width, device.height)
     device.set_camera(eye=vector([3, 0, 0, 1]),
@@ -228,6 +236,8 @@ if __name__ == '__main__':
                       up=vector([0, 0, 1, 1]))
 
     d = 1
+
+    fps_display = pyglet.clock.ClockDisplay()
 
 
     @game_window.event
@@ -240,17 +250,14 @@ if __name__ == '__main__':
         device.set_world_trans(trans)
         d += 0.0005
         d %= 180
+
         # draw box
-        device.draw_quad(mesh[0], mesh[1], mesh[2], mesh[3])
-        device.draw_quad(mesh[4], mesh[5], mesh[6], mesh[7])
-        device.draw_quad(mesh[0], mesh[4], mesh[5], mesh[1])
-        device.draw_quad(mesh[1], mesh[5], mesh[6], mesh[2])
-        device.draw_quad(mesh[2], mesh[6], mesh[7], mesh[3])
-        device.draw_quad(mesh[3], mesh[7], mesh[4], mesh[0])
+        device.draw_mesh(mesh, indices)
 
         frame.set_data(
             'RGBA', device.width * 4, device.get_frame_buffer_str())
         frame.blit(0, 0)
+        fps_display.draw()
 
 
     def update(dt):
