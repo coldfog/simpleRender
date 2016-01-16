@@ -85,13 +85,16 @@ class Device:
         self._world_trans = np.eye(4)
         self._view_trans = np.eye(4)
         self.set_perspective(
-            180 * 0.5,  float(self.width) / self.height, 1.0, 500)
+            np.pi * 0.5,  float(self.width) / self.height, 1.0, 500)
 
     def set_camera(self, eye, at, up):
 
         z = _normalize((at - eye)[:3])
+        print z
         x = _normalize(np.cross(up[:3], z))
+        print x
         y = _normalize(np.cross(z, x))
+        print y
 
         tmp_matrix = np.eye(4)
         tmp_matrix[0, :3] = x
@@ -154,12 +157,12 @@ class Device:
         # TODO mock for line drawing, implement by self later
         # simple clip
         for v in [v1, v2, v3]:
-            if v.pos[1] >= device.width:
-                v.pos[1] = device.width - 1
+            if v.pos[1] >= device.height:
+                v.pos[1] = device.height - 1
             if v.pos[1] < 0:
                 v.pos[1] = 0
-            if v.pos[0] >= device.height:
-                v.pos[0] = device.height - 1
+            if v.pos[0] >= device.width:
+                v.pos[0] = device.width - 1
             if v.pos[0] < 0:
                 v.pos[0] = 0
         rr, cc = line(v1.pos[1].astype(int), v1.pos[0].astype(int),
@@ -208,15 +211,14 @@ if __name__ == '__main__':
 
     d = 1
 
-    print device.transform(vector([0,0,0,1]))
     @game_window.event
     def on_draw():
         game_window.clear()
         device.clear_frame_buffer()
 
         global d
-        device.set_world_trans(_get_martix(rotate=(1, 1, 0, d)))
-        d += 0.05
+        device.set_world_trans(_get_martix(rotate=(1, 1, 1, d/np.pi*180)))
+        d += 0.0005
         d %= 180
         # draw box
         device.draw_quad(mesh[0], mesh[1], mesh[2], mesh[3])
