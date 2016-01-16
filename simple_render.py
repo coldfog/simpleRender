@@ -1,7 +1,6 @@
 import pyglet
 from pyglet import image
 import numpy as np
-import copy
 
 # TODO mock for line drawing, delete later
 from skimage.draw import line
@@ -144,31 +143,28 @@ class Device:
         return self._frame_buffer.tostring()
 
     def draw_primitive(self, v1, v2, v3):
-        v1 = copy.deepcopy(v1)
-        v2 = copy.deepcopy(v2)
-        v3 = copy.deepcopy(v3)
-        v1.pos = device.transform(v1.pos)
-        v2.pos = device.transform(v2.pos)
-        v3.pos = device.transform(v3.pos)
+        v1_pos = device.transform(v1.pos)
+        v2_pos = device.transform(v2.pos)
+        v3_pos = device.transform(v3.pos)
         # TODO mock for line drawing, implement by self later
         # simple clip
-        for v in [v1, v2, v3]:
-            if v.pos[1] >= device.height:
-                v.pos[1] = device.height - 1
-            if v.pos[1] < 0:
-                v.pos[1] = 0
-            if v.pos[0] >= device.width:
-                v.pos[0] = device.width - 1
-            if v.pos[0] < 0:
-                v.pos[0] = 0
-        rr, cc = line(v1.pos[1].astype(int), v1.pos[0].astype(int),
-                      v2.pos[1].astype(int), v2.pos[0].astype(int))
+        for v_pos in [v1_pos, v2_pos, v3_pos]:
+            if v_pos[1] >= device.height:
+                v_pos[1] = device.height - 1
+            if v_pos[1] < 0:
+                v_pos[1] = 0
+            if v_pos[0] >= device.width:
+                v_pos[0] = device.width - 1
+            if v_pos[0] < 0:
+                v_pos[0] = 0
+        rr, cc = line(v1_pos[1].astype(int), v1_pos[0].astype(int),
+                      v2_pos[1].astype(int), v2_pos[0].astype(int))
         self._frame_buffer[rr, cc, :] = 255
-        rr, cc = line(v2.pos[1].astype(int), v2.pos[0].astype(int),
-                      v3.pos[1].astype(int), v3.pos[0].astype(int))
+        rr, cc = line(v2_pos[1].astype(int), v2_pos[0].astype(int),
+                      v3_pos[1].astype(int), v3_pos[0].astype(int))
         self._frame_buffer[rr, cc, :] = 255
-        rr, cc = line(v3.pos[1].astype(int), v3.pos[0].astype(int),
-                      v1.pos[1].astype(int), v1.pos[0].astype(int))
+        rr, cc = line(v3_pos[1].astype(int), v3_pos[0].astype(int),
+                      v1_pos[1].astype(int), v1_pos[0].astype(int))
         self._frame_buffer[rr, cc, :] = 255
 
     def draw_quad(self, v1, v2, v3, v4):
