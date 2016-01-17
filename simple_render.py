@@ -17,9 +17,19 @@ class Vertex:
         self.color = color if color is not None else np.zeros(3)
         self.rhw = rhw if rhw else 0
 
+    def copy(self):
+        return Vertex(pos=self.pos.copy(),
+                      tex_coor=self.tex_coor.copy(),
+                      color=self.color.copy(),
+                      rhw=self.rhw)
+
 
 class Device:
+    RENDER_STATE_WIREFRAME = 1
+    RENDER_STATE_TEXTURE = 2
+
     def __init__(self, width, height):
+        self.state = Device.RENDER_STATE_TEXTURE
         self._frame_buffer = np.zeros((height, width, 4), dtype='uint8')
 
         self.width = width
@@ -31,6 +41,9 @@ class Device:
         self._trans = np.eye(4)
         self.set_perspective(
             np.pi * 0.5, float(self.width) / self.height, 1.0, 500)
+
+    def set_texture(self, texture):
+        self.texture = texture
 
     @staticmethod
     def make_transform(scale=None, rotate=None, translate=None):
@@ -171,27 +184,107 @@ class Device:
                 y += y_step
                 error += delta_x
 
+    @staticmethod
+    def _trapezoid_triangle(v1, v2, v3):
+        """
+        v1, v2, v3: Vertex obj.
+        ret list of trapezoid 0~2
+        """
+        # sort by pos[1]
+        if v1.pos[1] < v2.pos[1]:
+            v1, v2 = v2, v1
+        if v1.pos[1] < v3.pos[1]:
+            v1, v3 = v3, v1
+        if v2.pos[1] < v3.pos[1]:
+            v2, v3 = v3, v2
+
+        # collinear
+        if v1.pos[1] == v2.pos[1] and v2.pos[1] == v3.pos[1]:
+            return []
+        if v1.pos[0] == v2.pos[0] and v2.pos[0] == v3.pos[0]:
+            return []
+
+        # triangle down
+        if v1.pos[1] - v2.pos[1] < 0.5:
+            if v1.pos[0] > v2.pos[0]:
+                v1, v2 = v2, v1
+            return [dict(top=v1.pos[1], bottom=v3.pos[1], left=(v1, v3), right=(v2, v3))]
+        # triangle up
+        if v2.pos[1] - v3.pos[1] < 0.5:
+            if v2.pos[0] > v3.pos[0]:
+                v2, v3 = v3, v2
+            return [dict(top=v1.pos[1], bottom=v2.pos[1], left=(v1, v2), right=(v1, v3))]
+
+        # triangle double
+        k = (v1.pos[0] - v3.pos[0]) / (v1.pos[1] - v3.pos[1])
+        middle_x = (v2.pos[1] - v1.pos[1]) * k + v1.pos[0]
+        middle_y = v2.pos[1]
+        bottom = v3.pos[1]
+
+        if middle_x < v2.pos[0]:  # middle on the left
+            return [dict(top=v1.pos[1], bottom=middle_y, left=(v1, v3), right=(v1, v2)),
+                    dict(top=middle_y, bottom=bottom, left=(v1, v3), right=(v2, v3))]
+        else:
+            return [dict(top=v1.pos[1], bottom=middle_y, left=(v1, v2), right=(v1, v3)),
+                    dict(top=middle_y, bottom=bottom, left=(v2, v3), right=(v1, v3))]
+
+    def _draw_scan_line(self, trapezoid):
+        kl = (trapezoid['left'][0].pos[0] - trapezoid['left'][1].pos[0]) / \
+             (trapezoid['left'][0].pos[1] - trapezoid['left'][1].pos[1]) \
+            if trapezoid['left'][0].pos[0] != trapezoid['left'][1].pos[0] else 0
+
+        kr = (trapezoid['right'][0].pos[0] - trapezoid['right'][1].pos[0]) / \
+             (trapezoid['right'][0].pos[1] - trapezoid['right'][1].pos[1]) \
+            if trapezoid['right'][0].pos[0] != trapezoid['right'][1].pos[0] else 0
+
+        bottom = int(trapezoid['bottom'] + 0.5)
+        top = int(trapezoid['top'] + 0.5)
+        xl = (bottom - trapezoid['left'][1].pos[1]) * kl + trapezoid['left'][1].pos[0]
+        xr = (bottom - trapezoid['right'][1].pos[1]) * kr + trapezoid['right'][1].pos[0]
+
+        for i in xrange(bottom, top):
+            self._frame_buffer[i, int(xl + 0.5):int(xr + 0.5)] = vector([0, 255, 128, 255])
+            xl += kl
+            xr += kr
+
     def draw_primitive(self, v1, v2, v3):
-        v1_pos = device.transform(v1.pos)
-        v2_pos = device.transform(v2.pos)
-        v3_pos = device.transform(v3.pos)
+        p1 = v1.copy()
+        p2 = v2.copy()
+        p3 = v3.copy()
+
+        p1.pos = device.transform(v1.pos)
+        p2.pos = device.transform(v2.pos)
+        p3.pos = device.transform(v3.pos)
 
         # simple clip
-        for v_pos in [v1_pos, v2_pos, v3_pos]:
-            if v_pos[1] >= device.height:
-                v_pos[1] = device.height - 1
-            if v_pos[1] < 0:
-                v_pos[1] = 0
-            if v_pos[0] >= device.width:
-                v_pos[0] = device.width - 1
-            if v_pos[0] < 0:
-                v_pos[0] = 0
-        self.draw_line(v1_pos[1].astype(int), v1_pos[0].astype(int),
-                       v2_pos[1].astype(int), v2_pos[0].astype(int))
-        self.draw_line(v2_pos[1].astype(int), v2_pos[0].astype(int),
-                       v3_pos[1].astype(int), v3_pos[0].astype(int))
-        self.draw_line(v3_pos[1].astype(int), v3_pos[0].astype(int),
-                       v1_pos[1].astype(int), v1_pos[0].astype(int))
+        for v in [p1, p2, p3]:
+            if v.pos[1] >= device.height:
+                v.pos[1] = device.height - 1
+            if v.pos[1] < 0:
+                v.pos[1] = 0
+            if v.pos[0] >= device.width:
+                v.pos[0] = device.width - 1
+            if v.pos[0] < 0:
+                v.pos[0] = 0
+        if self.state == Device.RENDER_STATE_WIREFRAME:
+            self.draw_line(p1.pos[1].astype(int), p1.pos[0].astype(int),
+                           p2.pos[1].astype(int), p2.pos[0].astype(int))
+            self.draw_line(p2.pos[1].astype(int), p2.pos[0].astype(int),
+                           p3.pos[1].astype(int), p3.pos[0].astype(int))
+            self.draw_line(p3.pos[1].astype(int), p3.pos[0].astype(int),
+                           p1.pos[1].astype(int), p1.pos[0].astype(int))
+        elif self.state == Device.RENDER_STATE_TEXTURE:
+            trapezoids = self._trapezoid_triangle(p1, p2, p3)
+            for trap in trapezoids:
+                self._draw_scan_line(trap)
+        else:
+            raise Exception("Invalid Render state %s" % self.state)
+        self.draw_line(p1.pos[1].astype(int), p1.pos[0].astype(int),
+                       p2.pos[1].astype(int), p2.pos[0].astype(int))
+        self.draw_line(p2.pos[1].astype(int), p2.pos[0].astype(int),
+                       p3.pos[1].astype(int), p3.pos[0].astype(int))
+        self.draw_line(p3.pos[1].astype(int), p3.pos[0].astype(int),
+                       p1.pos[1].astype(int), p1.pos[0].astype(int))
 
     def draw_quad(self, v1, v2, v3, v4):
         self.draw_primitive(v1, v2, v3)
@@ -230,14 +323,23 @@ if __name__ == '__main__':
     ]
     indices = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]
 
-    frame = image.create(device.width, device.height)
     device.set_camera(eye=vector([3, 0, 0, 1]),
                       at=vector([0, 0, 0, 1]),
                       up=vector([0, 0, 1, 1]))
 
+    # the rotate degree
     d = 1
 
+    frame = image.create(device.width, device.height)
     fps_display = pyglet.clock.ClockDisplay()
+
+    # produce texture
+    texture = np.ones((256, 256, 4), dtype='uint8') * 255
+    grid_size = 32
+    for i in range(grid_size):
+        for j in [j * 2 for j in range(grid_size / 2)]:
+            texture[i * grid_size:i * grid_size + grid_size,
+            (j + (i % 2)) * grid_size:(j + (i % 2)) * grid_size + grid_size, :] = vector([0, 0, 0, 255])
 
 
     @game_window.event
