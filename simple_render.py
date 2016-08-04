@@ -237,10 +237,10 @@ class Device:
              (trapezoid['right'][0].pos[1] - trapezoid['right'][1].pos[1]) \
             if trapezoid['right'][0].pos[0] != trapezoid['right'][1].pos[0] else 0
 
+        xl = (trapezoid['bottom'] - trapezoid['left'][1].pos[1]) * kl + trapezoid['left'][1].pos[0]
+        xr = (trapezoid['bottom'] - trapezoid['right'][1].pos[1]) * kr + trapezoid['right'][1].pos[0]
         bottom = int(trapezoid['bottom'] + 0.5)
         top = int(trapezoid['top'] + 0.5)
-        xl = (bottom - trapezoid['left'][1].pos[1]) * kl + trapezoid['left'][1].pos[0]
-        xr = (bottom - trapezoid['right'][1].pos[1]) * kr + trapezoid['right'][1].pos[0]
 
         for i in xrange(bottom, top):
             self._frame_buffer[i, int(xl + 0.5):int(xr + 0.5)] = vector([0, 255, 128, 255])
@@ -256,7 +256,7 @@ class Device:
         p2.pos = device.transform(v2.pos)
         p3.pos = device.transform(v3.pos)
 
-        # simple clip
+        # simple clip TODO: This clip is wrong. Need to be fixed
         for v in [p1, p2, p3]:
             if v.pos[1] >= device.height:
                 v.pos[1] = device.height - 1
@@ -279,12 +279,6 @@ class Device:
                 self._draw_scan_line(trap)
         else:
             raise Exception("Invalid Render state %s" % self.state)
-        self.draw_line(p1.pos[1].astype(int), p1.pos[0].astype(int),
-                       p2.pos[1].astype(int), p2.pos[0].astype(int))
-        self.draw_line(p2.pos[1].astype(int), p2.pos[0].astype(int),
-                       p3.pos[1].astype(int), p3.pos[0].astype(int))
-        self.draw_line(p3.pos[1].astype(int), p3.pos[0].astype(int),
-                       p1.pos[1].astype(int), p1.pos[0].astype(int))
 
     def draw_quad(self, v1, v2, v3, v4):
         self.draw_primitive(v1, v2, v3)
