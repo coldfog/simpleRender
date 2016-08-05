@@ -30,6 +30,10 @@ class Device:
     RENDER_STATE_TEXTURE = 2
 
     def __init__(self, width, height):
+        self._texture = None
+        self.lights = dict(dir=[])
+
+
         self.state = Device.RENDER_STATE_TEXTURE
         self._frame_buffer = np.zeros((height, width, 4), dtype='uint8')
         self._z_buffer = np.zeros((height, width), dtype='float')
@@ -41,11 +45,12 @@ class Device:
         self._view_trans = np.eye(4)
         self._projection_trans = np.eye(4)
         self._trans = np.eye(4)
+        self._norm_trans = np.zeros(3)
         self.set_perspective(
             np.pi * 0.5, float(self.width) / self.height, 1.0, 500)
 
     def set_texture(self, texture):
-        self.texture = texture
+        self._texture = texture
 
     @staticmethod
     def make_transform(scale=None, rotate=None, translate=None):
@@ -133,6 +138,7 @@ class Device:
     def update_transform(self):
         tmp_trans = np.dot(self._world_trans, self._view_trans)
         self._trans = np.dot(tmp_trans, self._projection_trans)
+        self._norm_trans = np.linalg.inv(self._world_trans[:3, :3]).T
 
     def transform(self, v):
         # transform
@@ -146,6 +152,9 @@ class Device:
         transformed_v[3] = w
 
         return transformed_v
+
+    def transform_norm(self, v):
+        return np.dot(v, self._norm_trans)
 
     def clear_frame_buffer(self, color=vector([0, 0, 0, 255])):
         self._frame_buffer[..., 0] = color[0]
@@ -196,7 +205,7 @@ class Device:
         rhw = 1.0 / v.pos[3]
         v.rhw = rhw
         v.tex_coor *= rhw
-        v.norm *= rhw
+        # v.norm *= rhw
 
     def _vertex_interp(self, x1, x2, t):
         res = Vertex()
@@ -284,13 +293,21 @@ class Device:
             cur_y = int(start.pos[1] + 0.5)
 
             if r - l == 0:
-                self._frame_buffer[cur_y, l] = self._texture_readline(self.texture, start, end, r - l, 0)
+                self._frame_buffer[cur_y, l] = self._texture_readline(self._texture, start, end, r - l, 0)
                 continue
             z_buffer = self._z_buffer[cur_y, l:r]
             frame_buffer = self._frame_buffer[cur_y, l:r]
             rhw = np.linspace(start.rhw, end.rhw, r - l)
 
-            tex_line = self._texture_readline(self.texture, start, end, r - l, rhw)
+            tex_line = self._texture_readline(self._texture, start, end, r - l, rhw)
+            norm = np.vstack((np.linspace(start.norm[0], end.norm[0], r-l),
+                            np.linspace(start.norm[1], end.norm[1], r-l),
+                            np.linspace(start.norm[2], end.norm[2], r-l))).T
+
+            for light in self.lights['dir']:
+                diffuse = np.maximum(np.atleast_2d(np.dot(norm, light['dir'][:3])).T, 0) * light['diffuse'][:3]
+                tex_line[:,:3] = diffuse * tex_line[:,:3]
+                # tex_line[:, :3] = np.maximum(np.atleast_2d(np.dot(norm, light['dir'][:3])).T, 0)*tex_line[:,:3]#*light['diffuse'][:3]
 
             mask = z_buffer <= rhw
             frame_buffer[mask] = tex_line[mask]
@@ -299,6 +316,12 @@ class Device:
     def _is_backface(self, v1, v2, v3):
         m = np.vstack((v1.pos, v2.pos, v3.pos, v1.pos))
         return np.linalg.det(m[:2, :2]) + np.linalg.det(m[1:3, :2]) + np.linalg.det(m[2:4, :2]) >= 0
+
+    def add_dir_light(self, direction, ambient, diffuse, specular):
+        self.lights['dir'].append(dict(dir=direction, ambient=ambient, diffuse=diffuse, specular=specular))
+
+    def get_lights(self):
+        return self.lights
 
     def draw_primitive(self, v1, v2, v3):
 
@@ -309,6 +332,10 @@ class Device:
         p1.pos = device.transform(v1.pos)
         p2.pos = device.transform(v2.pos)
         p3.pos = device.transform(v3.pos)
+
+        p1.norm = device.transform_norm(v1.norm)
+        p2.norm = device.transform_norm(v2.norm)
+        p3.norm = device.transform_norm(v3.norm)
 
         # backface culling
         if self._is_backface(p1, p2, p3):
@@ -324,6 +351,7 @@ class Device:
                 v.pos[0] = device.width - 1
             if v.pos[0] < 0:
                 v.pos[0] = 0
+
         if self.state == Device.RENDER_STATE_WIREFRAME:
             self.draw_line(p1.pos[1].astype(int), p1.pos[0].astype(int),
                            p2.pos[1].astype(int), p2.pos[0].astype(int))
@@ -343,10 +371,6 @@ class Device:
             raise Exception("Invalid Render state %s" % self.state)
 
     def draw_quad(self, v1, v2, v3, v4):
-        # v1.tex_coor = vector([0, 0])
-        # v2.tex_coor = vector([0, 1])
-        # v3.tex_coor = vector([1, 1])
-        # v4.tex_coor = vector([1, 0])
         self.draw_primitive(v1, v2, v3)
         self.draw_primitive(v3, v4, v1)
 
@@ -440,6 +464,11 @@ if __name__ == '__main__':
             (j + (i % 2)) * grid_size:(j + (i % 2)) * grid_size + grid_size, :] = vector([0, 0, 0, 255])
 
     device.set_texture(texture)
+    device.add_dir_light(vector([0, 0, -1, 0]),
+                         vector([0.5, 0.5, 0.5, 1]),
+                         vector([0.8, 0.8, 1.0, 1]),
+                         vector([0.5, 0.5, 0.5, 1])
+                         )
 
 
     @game_window.event
