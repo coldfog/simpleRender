@@ -1,6 +1,7 @@
 import pyglet
 from pyglet import image
 import numpy as np
+import numba
 
 WINDOW_W = 800
 WINDOW_H = 600
@@ -11,16 +12,16 @@ def vector(x):
 
 
 class Vertex:
-    def __init__(self, pos=None, tex_coor=None, color=None, rhw=None):
+    def __init__(self, pos=None, tex_coor=None, norm=None, rhw=None):
         self.pos = pos if pos is not None else np.zeros(4)
         self.tex_coor = tex_coor if tex_coor is not None else np.zeros(2)
-        self.color = color if color is not None else np.zeros(3)
+        self.norm = norm if norm is not None else np.zeros(3)
         self.rhw = rhw if rhw else 0
 
     def copy(self):
         return Vertex(pos=self.pos.copy(),
                       tex_coor=self.tex_coor.copy(),
-                      color=self.color.copy(),
+                      norm=self.norm.copy(),
                       rhw=self.rhw)
 
 
@@ -32,7 +33,6 @@ class Device:
         self.state = Device.RENDER_STATE_TEXTURE
         self._frame_buffer = np.zeros((height, width, 4), dtype='uint8')
         self._z_buffer = np.zeros((height, width), dtype='float')
-
 
         self.width = width
         self.height = height
@@ -157,7 +157,7 @@ class Device:
     def get_frame_buffer_str(self):
         return self._frame_buffer.tostring()
 
-    def draw_line(self, x0, y0, x1, y1, color=vector([255,255,255,255])):
+    def draw_line(self, x0, y0, x1, y1, color=vector([255, 255, 255, 255])):
         """
         Bresenham line drawing
         x0, y0, x1, y1 must be integer
@@ -190,23 +190,22 @@ class Device:
                 error += delta_x
 
     def _interp(self, x1, x2, t):
-        return (x2-x1) * t + x1
+        return (x2 - x1) * t + x1
 
     def _vertex_init_rhw(self, v):
         rhw = 1.0 / v.pos[3]
         v.rhw = rhw
         v.tex_coor *= rhw
-        v.color *= rhw
+        v.norm *= rhw
 
     def _vertex_interp(self, x1, x2, t):
         res = Vertex()
         res.pos = self._interp(x1.pos, x2.pos, t)
         res.pos[3] = 1
         res.tex_coor = self._interp(x1.tex_coor, x2.tex_coor, t)
-        res.color = self._interp(x1.color, x2.color, t)
+        res.norm = self._interp(x1.norm, x2.norm, t)
         res.rhw = self._interp(x1.rhw, x2.rhw, t)
         return res
-
 
     def _trapezoid_triangle(self, v1, v2, v3):
         """
@@ -258,8 +257,8 @@ class Device:
         end_tex = end.tex_coor[0] * w, end.tex_coor[1] * h
 
         if line_width != 0:
-            x = (np.linspace(start_tex[0], end_tex[0], line_width)/rhw+0.5).astype(int)
-            y = (np.linspace(start_tex[1], end_tex[1], line_width)/rhw+0.5).astype(int)
+            x = (np.linspace(start_tex[0], end_tex[0], line_width) / rhw + 0.5).astype(int)
+            y = (np.linspace(start_tex[1], end_tex[1], line_width) / rhw + 0.5).astype(int)
 
             return tex[y, x]
         else:
@@ -272,7 +271,6 @@ class Device:
         bottom = int(left_edge[1].pos[1] + 0.5)
         top = int(left_edge[0].pos[1] + 0.5)
 
-
         for i in xrange(bottom, top):
 
             t = float(i - bottom) / (top - bottom)
@@ -283,26 +281,24 @@ class Device:
             l = int(start.pos[0] + 0.5)
             r = int(end.pos[0] + 0.5)
 
-            cur_y = int(start.pos[1]+0.5)
+            cur_y = int(start.pos[1] + 0.5)
 
-            if r-l == 0:
-                self._frame_buffer[cur_y, l] = self._texture_readline(self.texture, start, end, r-l, 0)
+            if r - l == 0:
+                self._frame_buffer[cur_y, l] = self._texture_readline(self.texture, start, end, r - l, 0)
                 continue
             z_buffer = self._z_buffer[cur_y, l:r]
             frame_buffer = self._frame_buffer[cur_y, l:r]
-            rhw = np.linspace(start.rhw, end.rhw, r-l)
+            rhw = np.linspace(start.rhw, end.rhw, r - l)
 
-            tex_line = self._texture_readline(self.texture, start, end, r-l, rhw)
+            tex_line = self._texture_readline(self.texture, start, end, r - l, rhw)
 
             mask = z_buffer <= rhw
             frame_buffer[mask] = tex_line[mask]
             z_buffer[mask] = rhw[mask]
 
-
     def _is_backface(self, v1, v2, v3):
         m = np.vstack((v1.pos, v2.pos, v3.pos, v1.pos))
         return np.linalg.det(m[:2, :2]) + np.linalg.det(m[1:3, :2]) + np.linalg.det(m[2:4, :2]) >= 0
-
 
     def draw_primitive(self, v1, v2, v3):
 
@@ -346,12 +342,11 @@ class Device:
         else:
             raise Exception("Invalid Render state %s" % self.state)
 
-
     def draw_quad(self, v1, v2, v3, v4):
-        v1.tex_coor = vector([0, 0])
-        v2.tex_coor = vector([0, 1])
-        v3.tex_coor = vector([1, 1])
-        v4.tex_coor = vector([1, 0])
+        # v1.tex_coor = vector([0, 0])
+        # v2.tex_coor = vector([0, 1])
+        # v3.tex_coor = vector([1, 1])
+        # v4.tex_coor = vector([1, 0])
         self.draw_primitive(v1, v2, v3)
         self.draw_primitive(v3, v4, v1)
 
@@ -368,25 +363,63 @@ if __name__ == '__main__':
     device = Device(WINDOW_W, WINDOW_H)
 
     # define the mesh of box
+
     mesh = [
-        Vertex(pos=vector([1, -1, 1, 1]), tex_coor=vector([0, 0]),
-               color=vector([1.0, 0.2, 0.2]), rhw=1),
-        Vertex(pos=vector([-1, -1, 1, 1]), tex_coor=vector([0, 1]),
-               color=vector([0.2, 1.0, 0.2]), rhw=1),
-        Vertex(pos=vector([-1, 1, 1, 1]), tex_coor=vector([1, 1]),
-               color=vector([0.2, 0.2, 1.0]), rhw=1),
-        Vertex(pos=vector([1, 1, 1, 1]), tex_coor=vector([1, 0]),
-               color=vector([1.0, 0.2, 1.0]), rhw=1),
-        Vertex(pos=vector([1, -1, -1, 1]), tex_coor=vector([0, 0]),
-               color=vector([1.0, 1.0, 0.2]), rhw=1),
-        Vertex(pos=vector([-1, -1, -1, 1]), tex_coor=vector([0, 1]),
-               color=vector([0.2, 1.0, 1.0]), rhw=1),
-        Vertex(pos=vector([-1, 1, -1, 1]), tex_coor=vector([1, 1]),
-               color=vector([1.0, 0.3, 0.3]), rhw=1),
-        Vertex(pos=vector([1, 1, -1, 1]), tex_coor=vector([1, 0]),
-               color=vector([0.2, 1.0, 0.3]), rhw=1)
-    ]
-    indices = [[0, 1, 2, 3], [7, 6, 5, 4], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]
+        Vertex(pos=vector([-0.5, -0.5, -0.5, 1]), norm=vector([0.0, 0.0, -1.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
+        Vertex(pos=vector([0.5, -0.5, -0.5, 1]), norm=vector([0.0, 0.0, -1.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, -0.5, 1]), norm=vector([0.0, 0.0, -1.0]), tex_coor=vector([1.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, -0.5, 1]), norm=vector([0.0, 0.0, -1.0]), tex_coor=vector([1.0, 1.0]), rhw=1),
+        Vertex(pos=vector([-0.5, 0.5, -0.5, 1]), norm=vector([0.0, 0.0, -1.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+        Vertex(pos=vector([-0.5, -0.5, -0.5, 1]), norm=vector([0.0, 0.0, -1.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
+
+        Vertex(pos=vector([-0.5, -0.5, 0.5, 1]), norm=vector([0.0, 0.0, 1.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
+        Vertex(pos=vector([0.5, -0.5, 0.5, 1]), norm=vector([0.0, 0.0, 1.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, 0.5, 1]), norm=vector([0.0, 0.0, 1.0]), tex_coor=vector([1.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, 0.5, 1]), norm=vector([0.0, 0.0, 1.0]), tex_coor=vector([1.0, 1.0]), rhw=1),
+        Vertex(pos=vector([-0.5, 0.5, 0.5, 1]), norm=vector([0.0, 0.0, 1.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+        Vertex(pos=vector([-0.5, -0.5, 0.5, 1]), norm=vector([0.0, 0.0, 1.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
+
+        Vertex(pos=vector([-0.5, 0.5, 0.5, 1]), norm=vector([-1.0, 0.0, 0.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+        Vertex(pos=vector([-0.5, 0.5, -0.5, 1]), norm=vector([-1.0, 0.0, 0.0]), tex_coor=vector([1.0, 1.0]), rhw=1),
+        Vertex(pos=vector([-0.5, -0.5, -0.5, 1]), norm=vector([-1.0, 0.0, 0.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+        Vertex(pos=vector([-0.5, -0.5, -0.5, 1]), norm=vector([-1.0, 0.0, 0.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+        Vertex(pos=vector([-0.5, -0.5, 0.5, 1]), norm=vector([-1.0, 0.0, 0.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
+        Vertex(pos=vector([-0.5, 0.5, 0.5, 1]), norm=vector([-1.0, 0.0, 0.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+
+        Vertex(pos=vector([0.5, 0.5, 0.5, 1]), norm=vector([1.0, 0.0, 0.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, -0.5, 1]), norm=vector([1.0, 0.0, 0.0]), tex_coor=vector([1.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, -0.5, -0.5, 1]), norm=vector([1.0, 0.0, 0.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, -0.5, -0.5, 1]), norm=vector([1.0, 0.0, 0.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, -0.5, 0.5, 1]), norm=vector([1.0, 0.0, 0.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, 0.5, 1]), norm=vector([1.0, 0.0, 0.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+
+        Vertex(pos=vector([-0.5, -0.5, -0.5, 1]), norm=vector([0.0, -1.0, 0.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, -0.5, -0.5, 1]), norm=vector([0.0, -1.0, 0.0]), tex_coor=vector([1.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, -0.5, 0.5, 1]), norm=vector([0.0, -1.0, 0.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+        Vertex(pos=vector([0.5, -0.5, 0.5, 1]), norm=vector([0.0, -1.0, 0.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+        Vertex(pos=vector([-0.5, -0.5, 0.5, 1]), norm=vector([0.0, -1.0, 0.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
+        Vertex(pos=vector([-0.5, -0.5, -0.5, 1]), norm=vector([0.0, -1.0, 0.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+
+        Vertex(pos=vector([-0.5, 0.5, -0.5, 1]), norm=vector([0.0, 1.0, 0.0]), tex_coor=vector([0.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, -0.5, 1]), norm=vector([0.0, 1.0, 0.0]), tex_coor=vector([1.0, 1.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, 0.5, 1]), norm=vector([0.0, 1.0, 0.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+        Vertex(pos=vector([0.5, 0.5, 0.5, 1]), norm=vector([0.0, 1.0, 0.0]), tex_coor=vector([1.0, 0.0]), rhw=1),
+        Vertex(pos=vector([-0.5, 0.5, 0.5, 1]), norm=vector([0.0, 1.0, 0.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
+        Vertex(pos=vector([-0.5, 0.5, -0.5, 1]), norm=vector([0.0, 1.0, 0.0]), tex_coor=vector([0.0, 1.]), rhw=1)]
+
+    indices = [[0, 1, 2],
+               [3, 4, 5],
+               [8, 7, 6],
+               [11, 10, 9],
+               [14, 13, 12],
+               [17, 16, 15],
+               [18, 19, 20],
+               [21, 22, 23],
+               [26, 25, 24],
+               [29, 28, 27],
+               [30, 31, 32],
+               [33, 34, 35]
+               ]
 
     device.set_camera(eye=vector([0, 0, -6, 1]),
                       at=vector([0, 0, 0, 1]),
@@ -426,7 +459,7 @@ if __name__ == '__main__':
         frame.set_data(
             'RGBA', device.width * 4, device.get_frame_buffer_str())
         frame.blit(0, 0)
-        # fps_display.draw()
+        fps_display.draw()
 
 
     def update(dt):
