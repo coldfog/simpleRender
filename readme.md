@@ -10,10 +10,16 @@ add every necessary step into only one file. For simplifying and performance, al
 1. World, view, projection transform
 2. Simple texture mapping
 3. Backface culling
+4. Z-buffer
 4. Diffuse direction lighting
 
 ## Screen shoot
 ![demo.png](demo.png)
+
+## Dependencies
+
++ numpy for fast math computation
++ pyglet for window management
 
 ## Note
 
