@@ -426,7 +426,7 @@ if __name__ == '__main__':
         frame.set_data(
             'RGBA', device.width * 4, device.get_frame_buffer_str())
         frame.blit(0, 0)
-        fps_display.draw()
+        # fps_display.draw()
 
 
     def update(dt):
