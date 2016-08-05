@@ -45,7 +45,7 @@ class Device:
         self._projection_trans = np.eye(4)
         self._trans = np.eye(4)
         self._norm_trans = np.zeros(3)
-        self.set_perspective( np.pi * 0.5, float(self.width) / self.height, 1.0, 500)
+        self.set_perspective(np.pi * 0.5, float(self.width) / self.height, 1.0, 500)
 
     def set_texture(self, texture):
         self._texture = texture
@@ -298,27 +298,46 @@ class Device:
         bottom = int(left_edge[1].pos[1] + 0.5)
         top = int(left_edge[0].pos[1] + 0.5)
 
-        for i in xrange(bottom, top):
+        for cur_y in xrange(bottom, top):
 
-            t = float(i - bottom) / (top - bottom)
+            t = float(cur_y - bottom) / (top - bottom)
 
-            start = Device._vertex_interp(left_edge[0], left_edge[1], t)
-            end = Device._vertex_interp(right_edge[0], right_edge[1], t)
+            start = Device._vertex_interp(left_edge[1], left_edge[0], t)
+            end = Device._vertex_interp(right_edge[1], right_edge[0], t)
+
+            if cur_y < 0: continue
+            if cur_y >= self.height: break
 
             l = int(start.pos[0] + 0.5)
             r = int(end.pos[0] + 0.5)
             sample_nums = r - l + 1
 
-            cur_y = int(start.pos[1] + 0.5)
+            # clip
+            if l < 0 < r:
+                l = 0
+            elif l <= r < 0:
+                continue
 
-            z_buffer = self._z_buffer[cur_y, l:r+1]
-            frame_buffer = self._frame_buffer[cur_y, l:r+1]
+            if r >= self.width > l:
+                r = self.width - 1
+            elif r >= l > self.width:
+                continue
+
+            z_buffer = self._z_buffer[cur_y, l:r + 1]
+            frame_buffer = self._frame_buffer[cur_y, l:r + 1]
             rhw = np.linspace(start.rhw, end.rhw, sample_nums)
             norm = np.vstack((np.linspace(start.norm[0], end.norm[0], sample_nums),
                               np.linspace(start.norm[1], end.norm[1], sample_nums),
                               np.linspace(start.norm[2], end.norm[2], sample_nums))).T
 
             tex_line = Device._texture_readline(self._texture, start, end, sample_nums, rhw)
+
+            # clip
+            clip_mask = np.arange(l, r + 1)
+            clip_mask = (clip_mask >= 0) & (clip_mask < self.width)
+            rhw = rhw[clip_mask]
+            norm = norm[clip_mask, :]
+            tex_line = tex_line[clip_mask, :]
 
             for light in self.lights['dir']:
                 light_dir = Device._normalize(light['dir'])
@@ -358,17 +377,6 @@ class Device:
         # backface culling
         if self._is_backface(p1, p2, p3):
             return
-
-        # simple clip TODO: This clip is wrong. Need to be fixed
-        for v in [p1, p2, p3]:
-            if v.pos[1] >= device.height:
-                v.pos[1] = device.height - 1
-            if v.pos[1] < 0:
-                v.pos[1] = 0
-            if v.pos[0] >= device.width:
-                v.pos[0] = device.width - 1
-            if v.pos[0] < 0:
-                v.pos[0] = 0
 
         if self.state == Device.RENDER_STATE_WIREFRAME:
             self.draw_line(p1.pos[1].astype(int), p1.pos[0].astype(int),
@@ -449,7 +457,8 @@ if __name__ == '__main__':
         Vertex(pos=vector([-0.5, 0.5, 0.5, 1]), norm=vector([0.0, 1.0, 0.0]), tex_coor=vector([0.0, 0.0]), rhw=1),
         Vertex(pos=vector([-0.5, 0.5, -0.5, 1]), norm=vector([0.0, 1.0, 0.0]), tex_coor=vector([0.0, 1.]), rhw=1)]
 
-    indices = [[0, 1, 2],
+    indices = [
+               [0, 1, 2],
                [3, 4, 5],
                [8, 7, 6],
                [11, 10, 9],
@@ -463,8 +472,8 @@ if __name__ == '__main__':
                [33, 34, 35]
                ]
 
-    device.set_camera(eye=vector([0, 0, -6, 1]),
-                      at=vector([0, 0, 0, 1]),
+    device.set_camera(eye=vector([0, 0, -3, 1]),
+                      at=vector([0.23, 0, 0, 1]),
                       up=vector([0, 1, 0, 1]))
 
     # the rotate degree
@@ -484,7 +493,7 @@ if __name__ == '__main__':
     device.set_texture(texture)
     device.add_dir_light(vector([0, 0, 3]),
                          vector([0.05, 0.05, 0.05]),
-                         vector([0.5, 0.5, 0.5]))
+                         vector([0.7, 0.7, 0.7]))
 
 
     @game_window.event
@@ -506,6 +515,7 @@ if __name__ == '__main__':
             'RGBA', device.width * 4, device.get_frame_buffer_str())
         frame.blit(0, 0)
         # fps_display.draw()
+
 
     pyglet.clock.schedule_interval(lambda dt: None, 1 / 60.0)
 
