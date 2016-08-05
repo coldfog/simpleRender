@@ -30,9 +30,8 @@ class Device:
     RENDER_STATE_TEXTURE = 2
 
     def __init__(self, width, height):
-        self._texture = None
         self.lights = dict(dir=[])
-
+        self._texture = None
 
         self.state = Device.RENDER_STATE_TEXTURE
         self._frame_buffer = np.zeros((height, width, 4), dtype='uint8')
@@ -46,8 +45,7 @@ class Device:
         self._projection_trans = np.eye(4)
         self._trans = np.eye(4)
         self._norm_trans = np.zeros(3)
-        self.set_perspective(
-            np.pi * 0.5, float(self.width) / self.height, 1.0, 500)
+        self.set_perspective( np.pi * 0.5, float(self.width) / self.height, 1.0, 500)
 
     def set_texture(self, texture):
         self._texture = texture
@@ -104,9 +102,9 @@ class Device:
 
     def set_camera(self, eye, at, up):
 
-        z = self._normalize((at - eye)[:3])
-        x = self._normalize(np.cross(up[:3], z))
-        y = self._normalize(np.cross(z, x))
+        z = Device._normalize((at - eye)[:3])
+        x = Device._normalize(np.cross(up[:3], z))
+        y = Device._normalize(np.cross(z, x))
 
         tmp_matrix = np.eye(4)
         tmp_matrix[0, :3] = x
@@ -161,6 +159,8 @@ class Device:
         self._frame_buffer[..., 1] = color[1]
         self._frame_buffer[..., 2] = color[2]
         self._frame_buffer[..., 3] = color[3]
+
+    def clear_z_buffer(self):
         self._z_buffer[...] = 0
 
     def get_frame_buffer_str(self):
@@ -198,25 +198,28 @@ class Device:
                 y += y_step
                 error += delta_x
 
-    def _interp(self, x1, x2, t):
+    @staticmethod
+    def _interp(x1, x2, t):
         return (x2 - x1) * t + x1
 
-    def _vertex_init_rhw(self, v):
+    @staticmethod
+    def _vertex_init_rhw(v):
         rhw = 1.0 / v.pos[3]
         v.rhw = rhw
         v.tex_coor *= rhw
-        # v.norm *= rhw
 
-    def _vertex_interp(self, x1, x2, t):
+    @staticmethod
+    def _vertex_interp(x1, x2, t):
         res = Vertex()
-        res.pos = self._interp(x1.pos, x2.pos, t)
+        res.pos = Device._interp(x1.pos, x2.pos, t)
         res.pos[3] = 1
-        res.tex_coor = self._interp(x1.tex_coor, x2.tex_coor, t)
-        res.norm = self._interp(x1.norm, x2.norm, t)
-        res.rhw = self._interp(x1.rhw, x2.rhw, t)
+        res.tex_coor = Device._interp(x1.tex_coor, x2.tex_coor, t)
+        res.norm = Device._interp(x1.norm, x2.norm, t)
+        res.rhw = Device._interp(x1.rhw, x2.rhw, t)
         return res
 
-    def _trapezoid_triangle(self, v1, v2, v3):
+    @staticmethod
+    def _trapezoid_triangle(v1, v2, v3):
         """
         v1, v2, v3: Vertex obj.
         ret list of trapezoid 0~2
@@ -248,7 +251,7 @@ class Device:
 
         t = (v2.pos[1] - v3.pos[1]) / (v1.pos[1] - v3.pos[1])
 
-        middle = self._vertex_interp(v3, v1, t)
+        middle = Device._vertex_interp(v3, v1, t)
 
         if middle.pos[0] < v2.pos[0]:  # middle on the left
             return (((v1, middle), (v1, v2)),  # top tri - left edge, right edge
@@ -257,7 +260,17 @@ class Device:
             return (((v1, v2), (v1, middle)),  # top tri - left edge, right edge
                     ((v2, v3), (middle, v3)))  # bottom tri - left edge, right edge
 
-    def _texture_readline(self, tex, start, end, line_width, rhw):
+    @staticmethod
+    def _texture_readline(tex, start, end, sample_nums, rhw):
+        """
+        Get a line of pixel on tex from start to end
+        :param tex: the texture
+        :param start: start vertex location
+        :param end: end vertex location
+        :param sample_nums: how many value will be sampled in this line
+        :param rhw: rhw
+        :return: the pixel value in an np.ndarray
+        """
         h, w, c = tex.shape
         h -= 1
         w -= 1
@@ -265,15 +278,20 @@ class Device:
         start_tex = start.tex_coor[0] * w, start.tex_coor[1] * h
         end_tex = end.tex_coor[0] * w, end.tex_coor[1] * h
 
-        if line_width != 0:
-            x = (np.linspace(start_tex[0], end_tex[0], line_width) / rhw + 0.5).astype(int)
-            y = (np.linspace(start_tex[1], end_tex[1], line_width) / rhw + 0.5).astype(int)
+        if sample_nums != 0:
+            x = (np.linspace(start_tex[0], end_tex[0], sample_nums) / rhw + 0.5).astype(int)
+            y = (np.linspace(start_tex[1], end_tex[1], sample_nums) / rhw + 0.5).astype(int)
 
             return tex[y, x]
         else:
             return tex[start_tex[1], start_tex[0]]
 
     def _draw_scan_line(self, trapezoid):
+        """
+        Draw scan line in trapezoid
+        :param trapezoid: a trapezoid, a tuple which returned by _trapezoid_triangle
+        :return: void
+        """
         left_edge = trapezoid[0]
         right_edge = trapezoid[1]
 
@@ -284,44 +302,48 @@ class Device:
 
             t = float(i - bottom) / (top - bottom)
 
-            start = self._vertex_interp(left_edge[0], left_edge[1], t)
-            end = self._vertex_interp(right_edge[0], right_edge[1], t)
+            start = Device._vertex_interp(left_edge[0], left_edge[1], t)
+            end = Device._vertex_interp(right_edge[0], right_edge[1], t)
 
             l = int(start.pos[0] + 0.5)
             r = int(end.pos[0] + 0.5)
+            sample_nums = r - l + 1
 
             cur_y = int(start.pos[1] + 0.5)
 
-            if r - l == 0:
-                self._frame_buffer[cur_y, l] = self._texture_readline(self._texture, start, end, r - l, 0)
+            if sample_nums == 1:
+                self._frame_buffer[cur_y, l] = Device._texture_readline(self._texture, start, end, sample_nums, start.rhw)
                 continue
-            z_buffer = self._z_buffer[cur_y, l:r]
-            frame_buffer = self._frame_buffer[cur_y, l:r]
-            rhw = np.linspace(start.rhw, end.rhw, r - l)
 
-            tex_line = self._texture_readline(self._texture, start, end, r - l, rhw)
-            norm = np.vstack((np.linspace(start.norm[0], end.norm[0], r-l),
-                            np.linspace(start.norm[1], end.norm[1], r-l),
-                            np.linspace(start.norm[2], end.norm[2], r-l))).T
+            z_buffer = self._z_buffer[cur_y, l:r+1]
+            frame_buffer = self._frame_buffer[cur_y, l:r+1]
+            rhw = np.linspace(start.rhw, end.rhw, sample_nums)
+            norm = np.vstack((np.linspace(start.norm[0], end.norm[0], sample_nums),
+                              np.linspace(start.norm[1], end.norm[1], sample_nums),
+                              np.linspace(start.norm[2], end.norm[2], sample_nums))).T
+
+            tex_line = Device._texture_readline(self._texture, start, end, sample_nums, rhw)
 
             for light in self.lights['dir']:
-                diffuse = np.maximum(np.atleast_2d(np.dot(norm, light['dir'][:3])).T, 0) * light['diffuse'][:3]
-                tex_line[:,:3] = diffuse * tex_line[:,:3]
-                # tex_line[:, :3] = np.maximum(np.atleast_2d(np.dot(norm, light['dir'][:3])).T, 0)*tex_line[:,:3]#*light['diffuse'][:3]
+                light_dir = Device._normalize(light['dir'])
+                diffuse = np.maximum(np.atleast_2d(np.dot(norm, -light_dir)).T, 0) * light['diffuse']
+                ambient = light['ambient']
+                tex_line[:, :3] = np.minimum((diffuse + ambient) * tex_line[:, :3], 255)
 
             mask = z_buffer <= rhw
             frame_buffer[mask] = tex_line[mask]
             z_buffer[mask] = rhw[mask]
 
-    def _is_backface(self, v1, v2, v3):
+    @staticmethod
+    def _is_backface(v1, v2, v3):
+        """
+        Determine if a triangle is clockwise or not. The algorithm is compute the signed area of triangle
+        """
         m = np.vstack((v1.pos, v2.pos, v3.pos, v1.pos))
         return np.linalg.det(m[:2, :2]) + np.linalg.det(m[1:3, :2]) + np.linalg.det(m[2:4, :2]) >= 0
 
-    def add_dir_light(self, direction, ambient, diffuse, specular):
-        self.lights['dir'].append(dict(dir=direction, ambient=ambient, diffuse=diffuse, specular=specular))
-
-    def get_lights(self):
-        return self.lights
+    def add_dir_light(self, direction, ambient, diffuse):
+        self.lights['dir'].append(dict(dir=direction, ambient=ambient, diffuse=diffuse))
 
     def draw_primitive(self, v1, v2, v3):
 
@@ -450,37 +472,36 @@ if __name__ == '__main__':
                       up=vector([0, 1, 0, 1]))
 
     # the rotate degree
-    d = 1
+    rotate_degree = 1
 
     frame = image.create(device.width, device.height)
     fps_display = pyglet.clock.ClockDisplay()
 
-    # produce texture
+    # produce texture, chess board
     texture = np.ones((256, 256, 4), dtype='uint8') * 255
     grid_size = 32
     for i in range(grid_size):
         for j in [j * 2 for j in range(grid_size / 2)]:
             texture[i * grid_size:i * grid_size + grid_size,
-            (j + (i % 2)) * grid_size:(j + (i % 2)) * grid_size + grid_size, :] = vector([0, 0, 0, 255])
+            (j + (i % 2)) * grid_size:(j + (i % 2)) * grid_size + grid_size, :] = vector([1, 128, 255, 255])
 
     device.set_texture(texture)
-    device.add_dir_light(vector([0, 0, -1, 0]),
-                         vector([0.5, 0.5, 0.5, 1]),
-                         vector([0.8, 0.8, 1.0, 1]),
-                         vector([0.5, 0.5, 0.5, 1])
-                         )
+    device.add_dir_light(vector([0, 0, 3]),
+                         vector([0.05, 0.05, 0.05]),
+                         vector([0.5, 0.5, 0.5]))
 
 
     @game_window.event
     def on_draw():
         game_window.clear()
         device.clear_frame_buffer(vector([128, 33, 78, 255]))
+        device.clear_z_buffer()
 
-        global d
-        trans = device.make_transform(rotate=(1, 1, 1, d / np.pi * 180))
+        global rotate_degree
+        trans = device.make_transform(rotate=(1, 1, 1, rotate_degree / np.pi * 180))
         device.set_world_trans(trans)
-        d += 0.0005
-        d %= 180
+        rotate_degree += 0.0005
+        rotate_degree %= 180
 
         # draw box
         device.draw_mesh(mesh, indices)
@@ -490,11 +511,6 @@ if __name__ == '__main__':
         frame.blit(0, 0)
         # fps_display.draw()
 
-
-    def update(dt):
-        pass
-
-
-    pyglet.clock.schedule_interval(update, 1 / 60.0)
+    pyglet.clock.schedule_interval(lambda dt: None, 1 / 60.0)
 
     pyglet.app.run()
