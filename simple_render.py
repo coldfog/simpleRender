@@ -388,7 +388,7 @@ if __name__ == '__main__':
     ]
     indices = [[0, 1, 2, 3], [7, 6, 5, 4], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]
 
-    device.set_camera(eye=vector([0, 0, -3, 1]),
+    device.set_camera(eye=vector([0, 0, -6, 1]),
                       at=vector([0, 0, 0, 1]),
                       up=vector([0, 1, 0, 1]))
 
@@ -412,7 +412,7 @@ if __name__ == '__main__':
     @game_window.event
     def on_draw():
         game_window.clear()
-        device.clear_frame_buffer()
+        device.clear_frame_buffer(vector([128, 33, 78, 255]))
 
         global d
         trans = device.make_transform(rotate=(1, 1, 1, d / np.pi * 180))
