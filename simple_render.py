@@ -157,7 +157,7 @@ class Device:
     def get_frame_buffer_str(self):
         return self._frame_buffer.tostring()
 
-    def draw_line(self, x0, y0, x1, y1):
+    def draw_line(self, x0, y0, x1, y1, color=vector([255,255,255,255])):
         """
         Bresenham line drawing
         x0, y0, x1, y1 must be integer
@@ -181,9 +181,9 @@ class Device:
 
         for x in xrange(x0, x1):
             if steep:
-                self._frame_buffer[y, x, :] = 255
+                self._frame_buffer[y, x, :] = color
             else:
-                self._frame_buffer[x, y, :] = 255
+                self._frame_buffer[x, y, :] = color
             error = error - delta_y
             if error < 0:
                 y += y_step
@@ -299,7 +299,13 @@ class Device:
             z_buffer[mask] = rhw[mask]
 
 
+    def _is_backface(self, v1, v2, v3):
+        m = np.vstack((v1.pos, v2.pos, v3.pos, v1.pos))
+        return np.linalg.det(m[:2, :2]) + np.linalg.det(m[1:3, :2]) + np.linalg.det(m[2:4, :2]) >= 0
+
+
     def draw_primitive(self, v1, v2, v3):
+
         p1 = v1.copy()
         p2 = v2.copy()
         p3 = v3.copy()
@@ -307,6 +313,10 @@ class Device:
         p1.pos = device.transform(v1.pos)
         p2.pos = device.transform(v2.pos)
         p3.pos = device.transform(v3.pos)
+
+        # backface culling
+        if self._is_backface(p1, p2, p3):
+            return
 
         # simple clip TODO: This clip is wrong. Need to be fixed
         for v in [p1, p2, p3]:
@@ -376,11 +386,11 @@ if __name__ == '__main__':
         Vertex(pos=vector([1, 1, -1, 1]), tex_coor=vector([1, 0]),
                color=vector([0.2, 1.0, 0.3]), rhw=1)
     ]
-    indices = [[0, 1, 2, 3], [4, 5, 6, 7], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]
+    indices = [[0, 1, 2, 3], [7, 6, 5, 4], [0, 4, 5, 1], [1, 5, 6, 2], [2, 6, 7, 3], [3, 7, 4, 0]]
 
-    device.set_camera(eye=vector([3, 0, 0, 1]),
+    device.set_camera(eye=vector([0, 0, -3, 1]),
                       at=vector([0, 0, 0, 1]),
-                      up=vector([0, 0, 1, 1]))
+                      up=vector([0, 1, 0, 1]))
 
     # the rotate degree
     d = 1
@@ -416,7 +426,7 @@ if __name__ == '__main__':
         frame.set_data(
             'RGBA', device.width * 4, device.get_frame_buffer_str())
         frame.blit(0, 0)
-        # fps_display.draw()
+        fps_display.draw()
 
 
     def update(dt):
