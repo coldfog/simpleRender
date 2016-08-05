@@ -311,10 +311,6 @@ class Device:
 
             cur_y = int(start.pos[1] + 0.5)
 
-            if sample_nums == 1:
-                self._frame_buffer[cur_y, l] = Device._texture_readline(self._texture, start, end, sample_nums, start.rhw)
-                continue
-
             z_buffer = self._z_buffer[cur_y, l:r+1]
             frame_buffer = self._frame_buffer[cur_y, l:r+1]
             rhw = np.linspace(start.rhw, end.rhw, sample_nums)
