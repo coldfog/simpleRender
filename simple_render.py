@@ -31,6 +31,8 @@ class Device:
     def __init__(self, width, height):
         self.state = Device.RENDER_STATE_TEXTURE
         self._frame_buffer = np.zeros((height, width, 4), dtype='uint8')
+        self._z_buffer = np.zeros((height, width), dtype='float')
+
 
         self.width = width
         self.height = height
@@ -135,11 +137,13 @@ class Device:
     def transform(self, v):
         # transform
         transformed_v = np.dot(v, self._trans)
+        w = transformed_v[3]
 
         # homogenize
         transformed_v /= transformed_v[3]
         transformed_v[0] = (transformed_v[0] + 1) * self.width * 0.5
         transformed_v[1] = (1 - transformed_v[1]) * self.height * 0.5
+        transformed_v[3] = w
 
         return transformed_v
 
@@ -148,6 +152,7 @@ class Device:
         self._frame_buffer[..., 1] = color[1]
         self._frame_buffer[..., 2] = color[2]
         self._frame_buffer[..., 3] = color[3]
+        self._z_buffer[...] = 0
 
     def get_frame_buffer_str(self):
         return self._frame_buffer.tostring()
@@ -184,8 +189,26 @@ class Device:
                 y += y_step
                 error += delta_x
 
-    @staticmethod
-    def _trapezoid_triangle(v1, v2, v3):
+    def _interp(self, x1, x2, t):
+        return (x2-x1) * t + x1
+
+    def _vertex_init_rhw(self, v):
+        rhw = 1.0 / v.pos[3]
+        v.rhw = rhw
+        v.tex_coor *= rhw
+        v.color *= rhw
+
+    def _vertex_interp(self, x1, x2, t):
+        res = Vertex()
+        res.pos = self._interp(x1.pos, x2.pos, t)
+        res.pos[3] = 1
+        res.tex_coor = self._interp(x1.tex_coor, x2.tex_coor, t)
+        res.color = self._interp(x1.color, x2.color, t)
+        res.rhw = self._interp(x1.rhw, x2.rhw, t)
+        return res
+
+
+    def _trapezoid_triangle(self, v1, v2, v3):
         """
         v1, v2, v3: Vertex obj.
         ret list of trapezoid 0~2
@@ -208,44 +231,73 @@ class Device:
         if v1.pos[1] - v2.pos[1] < 0.5:
             if v1.pos[0] > v2.pos[0]:
                 v1, v2 = v2, v1
-            return [dict(top=v1.pos[1], bottom=v3.pos[1], left=(v1, v3), right=(v2, v3))]
+            return ((v1, v3), (v2, v3)),
         # triangle up
         if v2.pos[1] - v3.pos[1] < 0.5:
             if v2.pos[0] > v3.pos[0]:
                 v2, v3 = v3, v2
-            return [dict(top=v1.pos[1], bottom=v2.pos[1], left=(v1, v2), right=(v1, v3))]
+            return ((v1, v2), (v1, v3)),
 
-        # triangle double
-        k = (v1.pos[0] - v3.pos[0]) / (v1.pos[1] - v3.pos[1])
-        middle_x = (v2.pos[1] - v1.pos[1]) * k + v1.pos[0]
-        middle_y = v2.pos[1]
-        bottom = v3.pos[1]
+        t = (v2.pos[1] - v3.pos[1]) / (v1.pos[1] - v3.pos[1])
 
-        if middle_x < v2.pos[0]:  # middle on the left
-            return [dict(top=v1.pos[1], bottom=middle_y, left=(v1, v3), right=(v1, v2)),
-                    dict(top=middle_y, bottom=bottom, left=(v1, v3), right=(v2, v3))]
+        middle = self._vertex_interp(v3, v1, t)
+
+        if middle.pos[0] < v2.pos[0]:  # middle on the left
+            return (((v1, middle), (v1, v2)),  # top tri - left edge, right edge
+                    ((middle, v3), (v2, v3)))  # bottom tri - left edge, right edge
         else:
-            return [dict(top=v1.pos[1], bottom=middle_y, left=(v1, v2), right=(v1, v3)),
-                    dict(top=middle_y, bottom=bottom, left=(v2, v3), right=(v1, v3))]
+            return (((v1, v2), (v1, middle)),  # top tri - left edge, right edge
+                    ((v2, v3), (middle, v3)))  # bottom tri - left edge, right edge
+
+    def _texture_readline(self, tex, start, end, line_width, rhw):
+        h, w, c = tex.shape
+        h -= 1
+        w -= 1
+
+        start_tex = start.tex_coor[0] * w, start.tex_coor[1] * h
+        end_tex = end.tex_coor[0] * w, end.tex_coor[1] * h
+
+        if line_width != 0:
+            x = (np.linspace(start_tex[0], end_tex[0], line_width)/rhw+0.5).astype(int)
+            y = (np.linspace(start_tex[1], end_tex[1], line_width)/rhw+0.5).astype(int)
+
+            return tex[y, x]
+        else:
+            return tex[start_tex[1], start_tex[0]]
 
     def _draw_scan_line(self, trapezoid):
-        kl = (trapezoid['left'][0].pos[0] - trapezoid['left'][1].pos[0]) / \
-             (trapezoid['left'][0].pos[1] - trapezoid['left'][1].pos[1]) \
-            if trapezoid['left'][0].pos[0] != trapezoid['left'][1].pos[0] else 0
+        left_edge = trapezoid[0]
+        right_edge = trapezoid[1]
 
-        kr = (trapezoid['right'][0].pos[0] - trapezoid['right'][1].pos[0]) / \
-             (trapezoid['right'][0].pos[1] - trapezoid['right'][1].pos[1]) \
-            if trapezoid['right'][0].pos[0] != trapezoid['right'][1].pos[0] else 0
+        bottom = int(left_edge[1].pos[1] + 0.5)
+        top = int(left_edge[0].pos[1] + 0.5)
 
-        xl = (trapezoid['bottom'] - trapezoid['left'][1].pos[1]) * kl + trapezoid['left'][1].pos[0]
-        xr = (trapezoid['bottom'] - trapezoid['right'][1].pos[1]) * kr + trapezoid['right'][1].pos[0]
-        bottom = int(trapezoid['bottom'] + 0.5)
-        top = int(trapezoid['top'] + 0.5)
 
         for i in xrange(bottom, top):
-            self._frame_buffer[i, int(xl + 0.5):int(xr + 0.5)] = vector([0, 255, 128, 255])
-            xl += kl
-            xr += kr
+
+            t = float(i - bottom) / (top - bottom)
+
+            start = self._vertex_interp(left_edge[0], left_edge[1], t)
+            end = self._vertex_interp(right_edge[0], right_edge[1], t)
+
+            l = int(start.pos[0] + 0.5)
+            r = int(end.pos[0] + 0.5)
+
+            cur_y = int(start.pos[1]+0.5)
+
+            if r-l == 0:
+                self._frame_buffer[cur_y, l] = self._texture_readline(self.texture, start, end, r-l, 0)
+                continue
+            z_buffer = self._z_buffer[cur_y, l:r]
+            frame_buffer = self._frame_buffer[cur_y, l:r]
+            rhw = np.linspace(start.rhw, end.rhw, r-l)
+
+            tex_line = self._texture_readline(self.texture, start, end, r-l, rhw)
+
+            mask = z_buffer <= rhw
+            frame_buffer[mask] = tex_line[mask]
+            z_buffer[mask] = rhw[mask]
+
 
     def draw_primitive(self, v1, v2, v3):
         p1 = v1.copy()
@@ -274,13 +326,22 @@ class Device:
             self.draw_line(p3.pos[1].astype(int), p3.pos[0].astype(int),
                            p1.pos[1].astype(int), p1.pos[0].astype(int))
         elif self.state == Device.RENDER_STATE_TEXTURE:
+            self._vertex_init_rhw(p1)
+            self._vertex_init_rhw(p2)
+            self._vertex_init_rhw(p3)
+
             trapezoids = self._trapezoid_triangle(p1, p2, p3)
             for trap in trapezoids:
                 self._draw_scan_line(trap)
         else:
             raise Exception("Invalid Render state %s" % self.state)
 
+
     def draw_quad(self, v1, v2, v3, v4):
+        v1.tex_coor = vector([0, 0])
+        v2.tex_coor = vector([0, 1])
+        v3.tex_coor = vector([1, 1])
+        v4.tex_coor = vector([1, 0])
         self.draw_primitive(v1, v2, v3)
         self.draw_primitive(v3, v4, v1)
 
@@ -335,6 +396,8 @@ if __name__ == '__main__':
             texture[i * grid_size:i * grid_size + grid_size,
             (j + (i % 2)) * grid_size:(j + (i % 2)) * grid_size + grid_size, :] = vector([0, 0, 0, 255])
 
+    device.set_texture(texture)
+
 
     @game_window.event
     def on_draw():
@@ -353,7 +416,7 @@ if __name__ == '__main__':
         frame.set_data(
             'RGBA', device.width * 4, device.get_frame_buffer_str())
         frame.blit(0, 0)
-        fps_display.draw()
+        # fps_display.draw()
 
 
     def update(dt):
