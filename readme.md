@@ -1,5 +1,7 @@
 # Simple Render
 
+[![996.ICU](https://img.shields.io/badge/link-996.icu-red.svg)](https://996.icu)
+
 ## Introduction
 
 This is a toy project for learning the theory of 3D render. I'm tring to
